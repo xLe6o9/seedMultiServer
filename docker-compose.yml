@@ -1,0 +1,35 @@
+services:
+
+  # Configuración NGINX
+  nginx:
+    image: nginx:alpine
+    container_name: containerDocker-nginx
+    restart: always
+    volumes:
+      - ./html:/usr/share/nginx/html
+    networks:
+      - webnet-tunnel
+    ports:
+      - "80:80"
+      - "443:443"
+
+  # Conector del Tunel CLOUDFLARED
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: containerCloudflared-Try
+    restart: always
+    network_mode: host
+#    networks:
+#      - webnet-tunnel
+#    environment:
+#      - TUNNEL_TOKEN=AQUI_VA_EL_TOKEN_TUNNEL_DE_CLOUDFLARE 
+    command: tunnel --no-autoupdate --url http://localhost:80
+#    command: tunnel --no-autoupdate --protocol http2 run
+    depends_on:
+      - nginx
+#    links:
+#      - nginx
+
+networks:
+  webnet-tunnel:
+   driver: bridge
