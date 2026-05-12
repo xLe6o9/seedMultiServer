@@ -10,6 +10,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: db_PostgreSQL_test
+          POSTGRES_USER: adminSUSE-POSTGRESQL
+          POSTGRES_PASSWORD: admin123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - name: Checkout código
       uses: actions/checkout@v4
@@ -20,8 +35,10 @@ jobs:
         distribution: 'temurin'
         java-version: '21'
 
-    - name: Compilar con Maven
+    - name: Compilar con Maven (usando perfil test)
       run: mvn clean package
+      env:
+        SPRING_PROFILES_ACTIVE: test
 
     - name: Subir artefacto (JAR)
       uses: actions/upload-artifact@v4
