@@ -79,18 +79,17 @@ jobs:
           cp "$JAR_FILE" /home/adminUbuntu-Backend/app/backend.jar
           echo "JAR copiado a /home/adminUbuntu-Backend/app/backend.jar"
 
-          # Reiniciar el servicio systemd (esto levanta la nueva versión)
-          # Nota: el usuario adminUbuntu-Backend tiene sudo sin contraseña solo para este comando
-          sudo systemctl restart backend
+          # Reiniciar el servicio systemd (sin contraseña, gracias a la regla sudoers)
+          sudo -n systemctl restart backend
 
           # Verificar que el servicio se haya reiniciado correctamente
           sleep 5
-          if sudo systemctl is-active --quiet backend; then
+          if sudo -n systemctl is-active --quiet backend; then
             echo "✅ Servicio backend reiniciado correctamente"
             echo "=== Últimas líneas del log del servicio ==="
-            sudo journalctl -u backend -n 30 --no-pager
+            sudo -n journalctl -u backend -n 30 --no-pager
           else
             echo "❌ El servicio falló al reiniciar"
-            sudo systemctl status backend --no-pager
+            sudo -n systemctl status backend --no-pager
             exit 1
           fi
