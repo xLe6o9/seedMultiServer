@@ -4,11 +4,11 @@ name: CI/CD Pipeline
 # Eventos que activan el workflow
 on:
   push:
-    branches: [ "main" ]       # Cada vez que se haga push a la rama main
+    branches: [ "main" ]       # Se ejecuta al hacer push a la rama main
   pull_request:
     branches: [ "main" ]       # También al crear/actualizar un pull request hacia main
 
-# Definición de los trabajos (jobs) que se ejecutan
+# Definición de los trabajos (jobs)
 jobs:
   # ------------------------------------------------------------
   # TRABAJO DE INTEGRACIÓN CONTINUA (CI)
@@ -16,7 +16,7 @@ jobs:
   # Se ejecuta en un runner estándar de GitHub (ubuntu-latest)
   # ------------------------------------------------------------
   build:
-    runs-on: ubuntu-latest     # Máquina virtual limpia proporcionada por GitHub
+    runs-on: ubuntu-latest
     steps:
       # 1. Descarga el código fuente del repositorio
       - name: Clonar código
@@ -48,6 +48,7 @@ jobs:
   deploy:
     needs: build                  # Espera a que 'build' termine correctamente
     runs-on: self-hosted          # Usa el runner que instalaste en tu VM
+
     steps:
       # 1. Descarga el artefacto (el .jar) que subió el trabajo 'build'
       - name: Descargar JAR
@@ -64,8 +65,10 @@ jobs:
           POSTGRES_PASSWORD: admin123
           BACKEND_NAME: seedBackendProject
         run: |
-          # Muestra qué archivos hay en el directorio actual (para depurar)
-          echo "Contenido del directorio actual:"
+          set -e   # Detiene el script si falla algún comando
+
+          echo "=== DEPURACIÓN: directorio de trabajo ==="
+          pwd
           ls -la
 
           # Busca el archivo .jar descargado (puede estar en subcarpetas)
@@ -83,29 +86,35 @@ jobs:
           cp "$JAR_FILE" /home/adminUbuntu-Backend/app/backend.jar
           cd /home/adminUbuntu-Backend/app
 
-          # Detiene cualquier versión anterior de la aplicación que esté corriendo
+          # Exporta las variables de entorno (por si el runner no las hereda)
+          export POSTGRES_URL="$POSTGRES_URL"
+          export POSTGRES_USER="$POSTGRES_USER"
+          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+          export BACKEND_NAME="$BACKEND_NAME"
+
+          # Muestra la ruta de Java (diagnóstico)
+          echo "Ruta de Java encontrada por which: $(which java || echo 'NO ENCONTRADO')"
+          # Usa la ruta absoluta que funcionó en las pruebas manuales
+          JAVA_CMD="/usr/bin/java"
+          echo "Usando Java: $JAVA_CMD"
+
+          # Detiene cualquier versión anterior de la aplicación
           pkill -f 'backend.jar' || true
           sleep 2
 
-          # Detecta la ruta del comando java (necesario para el servicio systemd)
-          JAVA_CMD=$(which java || echo "/usr/bin/java")
-          echo "Usando Java: $JAVA_CMD"
-
-          # Lanza la nueva versión en segundo plano (nohup) y redirige logs a app.log
+          # Lanza la nueva versión en segundo plano y redirige logs a app.log
           nohup $JAVA_CMD -jar backend.jar > app.log 2>&1 &
           PID=$!
           echo "Aplicación lanzada con PID: $PID"
 
-          # Espera 3 segundos y verifica que el proceso siga vivo
-          sleep 3
+          # Espera 5 segundos y verifica que el proceso siga vivo
+          sleep 5
           if kill -0 $PID 2>/dev/null; then
             echo "✅ Aplicación en ejecución (PID $PID)"
+            echo "=== Últimas líneas de app.log ==="
+            tail -30 app.log
           else
-            echo "❌ La aplicación falló al iniciar. Mostrando app.log:"
+            echo "❌ La aplicación falló al iniciar. Mostrando app.log completo:"
             cat app.log
             exit 1
           fi
-
-          # Muestra las primeras líneas del log para confirmar que arrancó
-          echo "Primeras líneas de app.log:"
-          head -20 app.log
