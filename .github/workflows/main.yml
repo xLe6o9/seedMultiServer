@@ -1,95 +1,111 @@
-# Nombre del workflow (aparece en la pestaña Actions)
+# Nombre del workflow
 name: CI/CD Pipeline
 
-# Eventos que activan el workflow
+# Eventos que lo activan
 on:
   push:
-    branches: [ "main" ]       # Se ejecuta al hacer push a la rama main
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]       # También al crear/actualizar un pull request hacia main
+    branches: [ "main" ]
 
-# Definición de los trabajos (jobs)
 jobs:
-  # ------------------------------------------------------------
-  # TRABAJO DE INTEGRACIÓN CONTINUA (CI)
-  # Compila y empaqueta la aplicación Spring Boot
-  # Se ejecuta en un runner estándar de GitHub (ubuntu-latest)
-  # ------------------------------------------------------------
+  # ========== CI: compilar y empaquetar ==========
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. Descarga el código fuente del repositorio
       - name: Clonar código
         uses: actions/checkout@v4
 
-      # 2. Instala y configura JDK 21 (necesario para compilar)
       - name: Configurar JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # 3. Compila el proyecto, ejecuta las pruebas y genera el archivo .jar
       - name: Compilar con Maven
         run: mvn clean package
 
-      # 4. Guarda el archivo .jar generado como "artefacto" para usarlo en otros jobs
       - name: Subir artefacto (JAR)
         uses: actions/upload-artifact@v4
         with:
-          name: backend-jar          # Nombre del artefacto
-          path: target/*.jar         # Ruta del archivo generado
+          name: backend-jar
+          path: target/*.jar
 
-  # ------------------------------------------------------------
-  # TRABAJO DE DESPLIEGUE CONTINUO (CD)
-  # Toma el .jar del trabajo anterior y lo despliega en tu VM local
-  # Se ejecuta en un "self-hosted runner" (tu máquina Ubuntu Backend)
-  # ------------------------------------------------------------
+  # ========== CD: desplegar en VM local ==========
   deploy:
-    needs: build                  # Espera a que 'build' termine correctamente
-    runs-on: self-hosted          # Usa el runner que instalaste en tu VM
-
+    needs: build
+    runs-on: self-hosted   # Tu runner en Ubuntu Backend
     steps:
-      # 1. Descarga el artefacto (el .jar) que subió el trabajo 'build'
       - name: Descargar JAR
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
 
-      # 2. Despliega la aplicación usando systemd (método profesional)
-      - name: Desplegar con systemd
+      - name: Desplegar aplicación (método robusto con nohup + disown)
+        env:
+          POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
+          POSTGRES_USER: adminSUSE-POSTGRESQL
+          POSTGRES_PASSWORD: admin123
+          BACKEND_NAME: seedBackendProject
         run: |
-          # Depuración: mostrar qué archivos hay
-          echo "=== Depuración: directorio de trabajo ==="
+          set -e
+          echo "=== Directorio actual ==="
           pwd
           ls -la
 
-          # Busca el archivo .jar descargado (puede estar en subcarpeta)
+          # Buscar el JAR descargado (nombre exacto puede variar)
           JAR_FILE=$(find . -name "*.jar" | head -1)
           if [ -z "$JAR_FILE" ]; then
-            echo "ERROR: No se encontró ningún archivo JAR"
+            echo "ERROR: No se encontró ningún JAR"
             exit 1
           fi
           echo "JAR encontrado: $JAR_FILE"
 
-          # Crear directorio de la aplicación (si no existe)
-          mkdir -p /home/adminUbuntu-Backend/app
+          # Directorio donde vivirá la app
+          APP_DIR="/home/adminUbuntu-Backend/app"
+          mkdir -p "$APP_DIR"
 
-          # Copiar el nuevo JAR a la ubicación definitiva
-          cp "$JAR_FILE" /home/adminUbuntu-Backend/app/backend.jar
-          echo "JAR copiado a /home/adminUbuntu-Backend/app/backend.jar"
+          # Copiar el nuevo JAR
+          cp "$JAR_FILE" "$APP_DIR/backend.jar"
+          echo "JAR copiado a $APP_DIR/backend.jar"
 
-          # Reiniciar el servicio systemd (sin contraseña, gracias a la regla sudoers)
-          sudo -n systemctl restart backend
+          # --- 1. Matar proceso anterior (si existe) ---
+          # Buscar PID del proceso java que ejecuta backend.jar
+          OLD_PID=$(pgrep -f "java.*backend.jar" || true)
+          if [ -n "$OLD_PID" ]; then
+            echo "Matando proceso anterior PID $OLD_PID"
+            kill -15 "$OLD_PID" || true
+            sleep 3
+            # Forzar si no murió
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+              kill -9 "$OLD_PID" || true
+            fi
+          fi
 
-          # Verificar que el servicio se haya reiniciado correctamente
+          # --- 2. Lanzar nueva versión ---
+          cd "$APP_DIR"
+          export POSTGRES_URL="$POSTGRES_URL"
+          export POSTGRES_USER="$POSTGRES_USER"
+          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+          export BACKEND_NAME="$BACKEND_NAME"
+
+          # Usar nohup + disown para desvincular del runner
+          nohup /usr/bin/java -jar backend.jar > app.log 2>&1 &
+          JOB_PID=$!
+          echo "Aplicación lanzada con PID: $JOB_PID"
+
+          # Disown para que el proceso no reciba SIGHUP al terminar el job
+          disown $JOB_PID
+
+          # --- 3. Verificar que el proceso sobrevive ---
           sleep 5
-          if sudo -n systemctl is-active --quiet backend; then
-            echo "✅ Servicio backend reiniciado correctamente"
-            echo "=== Últimas líneas del log del servicio ==="
-            sudo -n journalctl -u backend -n 30 --no-pager
+          if pgrep -f "java.*backend.jar" > /dev/null; then
+            NEW_PID=$(pgrep -f "java.*backend.jar")
+            echo "✅ Aplicación en ejecución (PID $NEW_PID)"
+            echo "=== Últimas líneas del log ==="
+            tail -30 app.log
           else
-            echo "❌ El servicio falló al reiniciar"
-            sudo -n systemctl status backend --no-pager
+            echo "❌ La aplicación no arrancó. Log completo:"
+            cat app.log
             exit 1
           fi
