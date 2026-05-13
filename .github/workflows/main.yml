@@ -33,6 +33,12 @@ jobs:
         with:
           name: backend-jar
       - name: Desplegar en VM Backend
+        env:
+          POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
+          POSTGRES_USER: adminSUSE-POSTGRESQL
+          POSTGRES_PASSWORD: admin123
+          # Si tu aplicación usa otros perfiles, puedes forzar el perfil activo
+          SPRING_PROFILES_ACTIVE: dev
         run: |
           # Crear directorio si no existe
           mkdir -p /home/adminUbuntu-Backend/app
@@ -41,6 +47,6 @@ jobs:
           cd /home/adminUbuntu-Backend/app
           # Detener proceso anterior si existe
           pkill -f 'java -jar backend.jar' || true
-          # Lanzar nueva versión en segundo plano
-          nohup java -jar backend.jar > app.log 2>&1 &
+          # Usamos la ruta absoluta de java para evitar problemas de PATH
+          nohup /usr/bin/java -jar backend.jar > app.log 2>&1 &
           echo "Despliegue completado. PID: $!"
