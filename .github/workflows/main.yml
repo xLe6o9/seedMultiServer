@@ -1,4 +1,4 @@
-name: CI (Compilar y empaquetar)
+name: CI/CD Pipeline
 
 on:
   push:
@@ -9,39 +9,38 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: db_PostgreSQL_test
-          POSTGRES_USER: adminSUSE-POSTGRESQL
-          POSTGRES_PASSWORD: admin123
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-    - name: Checkout código
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Build with Maven
+        run: mvn clean package
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: target/*.jar
 
-    - name: Configurar JDK 21
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '21'
-
-    - name: Compilar con Maven (usando perfil test)
-      run: mvn clean package
-      env:
-        SPRING_PROFILES_ACTIVE: test
-
-    - name: Subir artefacto (JAR)
-      uses: actions/upload-artifact@v4
-      with:
-        name: backend-jar
-        path: target/*.jar
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    steps:
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+      - name: Desplegar en VM Backend
+        run: |
+          # Crear directorio si no existe
+          mkdir -p /home/adminUbuntu-Backend/app
+          # Mover el JAR descargado (solo hay uno)
+          mv *.jar /home/adminUbuntu-Backend/app/backend.jar
+          cd /home/adminUbuntu-Backend/app
+          # Detener proceso anterior si existe
+          pkill -f 'java -jar backend.jar' || true
+          # Lanzar nueva versión en segundo plano
+          nohup java -jar backend.jar > app.log 2>&1 &
+          echo "Despliegue completado. PID: $!"
