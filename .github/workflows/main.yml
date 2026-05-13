@@ -56,22 +56,15 @@ jobs:
         with:
           name: backend-jar
 
-      # 2. Despliega la aplicación en el servidor backend
-      - name: Desplegar en VM Backend
-        env:
-          # Variables de entorno que necesita tu application.yml
-          POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
-          POSTGRES_USER: adminSUSE-POSTGRESQL
-          POSTGRES_PASSWORD: admin123
-          BACKEND_NAME: seedBackendProject
+      # 2. Despliega la aplicación usando systemd (método profesional)
+      - name: Desplegar con systemd
         run: |
-          set -e   # Detiene el script si falla algún comando
-
-          echo "=== DEPURACIÓN: directorio de trabajo ==="
+          # Depuración: mostrar qué archivos hay
+          echo "=== Depuración: directorio de trabajo ==="
           pwd
           ls -la
 
-          # Busca el archivo .jar descargado (puede estar en subcarpetas)
+          # Busca el archivo .jar descargado (puede estar en subcarpeta)
           JAR_FILE=$(find . -name "*.jar" | head -1)
           if [ -z "$JAR_FILE" ]; then
             echo "ERROR: No se encontró ningún archivo JAR"
@@ -79,42 +72,25 @@ jobs:
           fi
           echo "JAR encontrado: $JAR_FILE"
 
-          # Crea el directorio donde vivirá la aplicación (si no existe)
+          # Crear directorio de la aplicación (si no existe)
           mkdir -p /home/adminUbuntu-Backend/app
 
-          # Copia el JAR a la carpeta de la aplicación
+          # Copiar el nuevo JAR a la ubicación definitiva
           cp "$JAR_FILE" /home/adminUbuntu-Backend/app/backend.jar
-          cd /home/adminUbuntu-Backend/app
+          echo "JAR copiado a /home/adminUbuntu-Backend/app/backend.jar"
 
-          # Exporta las variables de entorno (por si el runner no las hereda)
-          export POSTGRES_URL="$POSTGRES_URL"
-          export POSTGRES_USER="$POSTGRES_USER"
-          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
-          export BACKEND_NAME="$BACKEND_NAME"
+          # Reiniciar el servicio systemd (esto levanta la nueva versión)
+          # Nota: el usuario adminUbuntu-Backend tiene sudo sin contraseña solo para este comando
+          sudo systemctl restart backend
 
-          # Muestra la ruta de Java (diagnóstico)
-          echo "Ruta de Java encontrada por which: $(which java || echo 'NO ENCONTRADO')"
-          # Usa la ruta absoluta que funcionó en las pruebas manuales
-          JAVA_CMD="/usr/bin/java"
-          echo "Usando Java: $JAVA_CMD"
-
-          # Detiene cualquier versión anterior de la aplicación
-          pkill -f 'backend.jar' || true
-          sleep 2
-
-          # Lanza la nueva versión en segundo plano y redirige logs a app.log
-          nohup $JAVA_CMD -jar backend.jar > app.log 2>&1 &
-          PID=$!
-          echo "Aplicación lanzada con PID: $PID"
-
-          # Espera 5 segundos y verifica que el proceso siga vivo
+          # Verificar que el servicio se haya reiniciado correctamente
           sleep 5
-          if kill -0 $PID 2>/dev/null; then
-            echo "✅ Aplicación en ejecución (PID $PID)"
-            echo "=== Últimas líneas de app.log ==="
-            tail -30 app.log
+          if sudo systemctl is-active --quiet backend; then
+            echo "✅ Servicio backend reiniciado correctamente"
+            echo "=== Últimas líneas del log del servicio ==="
+            sudo journalctl -u backend -n 30 --no-pager
           else
-            echo "❌ La aplicación falló al iniciar. Mostrando app.log completo:"
-            cat app.log
+            echo "❌ El servicio falló al reiniciar"
+            sudo systemctl status backend --no-pager
             exit 1
           fi
