@@ -1,24 +1,74 @@
-  deploy:
-    needs: build
-    runs-on: self-hosted
+# Nombre del workflow (aparece en la pestaña Actions)
+name: CI/CD Pipeline
+
+# Eventos que activan el workflow
+on:
+  push:
+    branches: [ "main" ]       # Cada vez que se haga push a la rama main
+  pull_request:
+    branches: [ "main" ]       # También al crear/actualizar un pull request hacia main
+
+# Definición de los trabajos (jobs) que se ejecutan
+jobs:
+  # ------------------------------------------------------------
+  # TRABAJO DE INTEGRACIÓN CONTINUA (CI)
+  # Compila y empaqueta la aplicación Spring Boot
+  # Se ejecuta en un runner estándar de GitHub (ubuntu-latest)
+  # ------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest     # Máquina virtual limpia proporcionada por GitHub
     steps:
-      - name: Download JAR artifact
+      # 1. Descarga el código fuente del repositorio
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      # 2. Instala y configura JDK 21 (necesario para compilar)
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # 3. Compila el proyecto, ejecuta las pruebas y genera el archivo .jar
+      - name: Compilar con Maven
+        run: mvn clean package
+
+      # 4. Guarda el archivo .jar generado como "artefacto" para usarlo en otros jobs
+      - name: Subir artefacto (JAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar          # Nombre del artefacto
+          path: target/*.jar         # Ruta del archivo generado
+
+  # ------------------------------------------------------------
+  # TRABAJO DE DESPLIEGUE CONTINUO (CD)
+  # Toma el .jar del trabajo anterior y lo despliega en tu VM local
+  # Se ejecuta en un "self-hosted runner" (tu máquina Ubuntu Backend)
+  # ------------------------------------------------------------
+  deploy:
+    needs: build                  # Espera a que 'build' termine correctamente
+    runs-on: self-hosted          # Usa el runner que instalaste en tu VM
+    steps:
+      # 1. Descarga el artefacto (el .jar) que subió el trabajo 'build'
+      - name: Descargar JAR
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
 
+      # 2. Despliega la aplicación en el servidor backend
       - name: Desplegar en VM Backend
         env:
+          # Variables de entorno que necesita tu application.yml
           POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
           POSTGRES_USER: adminSUSE-POSTGRESQL
           POSTGRES_PASSWORD: admin123
           BACKEND_NAME: seedBackendProject
         run: |
-          # Depuración: mostrar qué archivos hay
+          # Muestra qué archivos hay en el directorio actual (para depurar)
           echo "Contenido del directorio actual:"
           ls -la
 
-          # Buscar el JAR descargado (puede estar en subcarpeta o con nombre variable)
+          # Busca el archivo .jar descargado (puede estar en subcarpetas)
           JAR_FILE=$(find . -name "*.jar" | head -1)
           if [ -z "$JAR_FILE" ]; then
             echo "ERROR: No se encontró ningún archivo JAR"
@@ -26,31 +76,27 @@
           fi
           echo "JAR encontrado: $JAR_FILE"
 
-          # Crear directorio de la aplicación
+          # Crea el directorio donde vivirá la aplicación (si no existe)
           mkdir -p /home/adminUbuntu-Backend/app
 
-          # Copiar el JAR (mejor copiar que mover, para no perderlo)
+          # Copia el JAR a la carpeta de la aplicación
           cp "$JAR_FILE" /home/adminUbuntu-Backend/app/backend.jar
           cd /home/adminUbuntu-Backend/app
 
-          # Matar proceso anterior (por puerto o por nombre)
-          fuser -k 8080/tcp 2>/dev/null || true
+          # Detiene cualquier versión anterior de la aplicación que esté corriendo
           pkill -f 'backend.jar' || true
-
-          # Esperar a que se libere el puerto
           sleep 2
 
-          # Ejecutar el JAR con la ruta absoluta de Java
-          # Primero localizamos java
+          # Detecta la ruta del comando java (necesario para el servicio systemd)
           JAVA_CMD=$(which java || echo "/usr/bin/java")
           echo "Usando Java: $JAVA_CMD"
 
-          # Lanzar la aplicación y guardar su PID
+          # Lanza la nueva versión en segundo plano (nohup) y redirige logs a app.log
           nohup $JAVA_CMD -jar backend.jar > app.log 2>&1 &
           PID=$!
           echo "Aplicación lanzada con PID: $PID"
 
-          # Esperar un momento y verificar si el proceso sigue vivo
+          # Espera 3 segundos y verifica que el proceso siga vivo
           sleep 3
           if kill -0 $PID 2>/dev/null; then
             echo "✅ Aplicación en ejecución (PID $PID)"
@@ -60,6 +106,6 @@
             exit 1
           fi
 
-          # Mostrar contenido de app.log (primeras líneas)
+          # Muestra las primeras líneas del log para confirmar que arrancó
           echo "Primeras líneas de app.log:"
           head -20 app.log
