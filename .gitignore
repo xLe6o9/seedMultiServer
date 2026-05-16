@@ -15,6 +15,7 @@ application-secrets.yml
 build/
 *.class
 .classpath
+*.conf
 **/data/
 #/DataBase/
 /dist/
