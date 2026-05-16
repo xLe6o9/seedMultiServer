@@ -1,0 +1,10 @@
+# Ignorar carpetas de datos persistentes
+**/data/
+
+# Ignorar archivos con secretos
+**/.env
+
+# Ignorar archivos temporales del sistema
+*.swp
+*.tmp
+.DS_Store
