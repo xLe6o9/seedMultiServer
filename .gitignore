@@ -1,53 +1,52 @@
-#/Backend/
-#/DataBase/
-
-HELP.md
-target/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
-.vscode/
-
-## Security KEY ##
-.env
-application-secrets.yml
-
-!.env.test
 
 # Archivos típicos de Java / Maven (de main)
-target/
+# Ignorar archivos con secretos
+# Ignorar archivos temporales del sistema
+# Ignorar carpetas de datos persistentes
+### IntelliJ IDEA ###
+### NetBeans ###
+# Node modules (para frontend)
+## Security KEY ##
+### STS ###
+### VS Code ###
+application-secrets.yml
+.apt_generated
+#/Backend/
+build/
 *.class
+.classpath
+**/data/
+#/DataBase/
+/dist/
+.DS_Store
+**/.env
+.env
+!.env.test
+.factorypath
+HELP.md
+.idea
+*.iml
+*.ipr
+*.iws
 *.log
 .mvn/
 mvnw
 mvnw.cmd
-
-# Node modules (para frontend)
+.mvn/wrapper/maven-wrapper.jar
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+/nbproject/private/
 node_modules/
+.project
+.settings
+.springBeans
+!**/src/main/**/build/
+!**/src/main/**/target/
+!**/src/test/**/build/
+!**/src/test/**/target/
+.sts4-cache
+*.swp
+target/
+*.tmp
+.vscode/
