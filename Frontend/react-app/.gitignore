@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 node_modules/
+
+# Node modules (para frontend)
+node_modules/

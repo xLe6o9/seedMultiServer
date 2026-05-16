@@ -28,7 +28,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: self-hosted
+    runs-on: [self-hosted, backend]   # <-- ETIQUETA backend
     steps:
       - name: Descargar JAR
         uses: actions/download-artifact@v4
@@ -44,7 +44,6 @@ jobs:
           SPRING_PROFILES_ACTIVE: prod
         run: |
           set -e
-          # Forzar PATH y usar ruta absoluta
           export PATH=/usr/bin:$PATH
           echo "Ruta de Java: $(which java)"
           /usr/bin/java -version
