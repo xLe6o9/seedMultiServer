@@ -1,3 +1,6 @@
+/Backend/
+/DataBase/
+
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
@@ -37,3 +40,14 @@ build/
 application-secrets.yml
 
 !.env.test
+
+# Archivos típicos de Java / Maven (de main)
+target/
+*.class
+*.log
+.mvn/
+mvnw
+mvnw.cmd
+
+# Node modules (para frontend)
+node_modules/
