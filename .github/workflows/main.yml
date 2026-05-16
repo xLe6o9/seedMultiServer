@@ -67,7 +67,7 @@ jobs:
           export BACKEND_NAME="$BACKEND_NAME"
           export SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE"
           # Añadir perfil activo a la línea de Java
-          nohup /usr/bin/java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
+	  nohup java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
           JOB_PID=$!
           disown $JOB_PID
           sleep 5
