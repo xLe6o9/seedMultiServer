@@ -55,7 +55,8 @@ jobs:
             echo "ERROR: No se encontró ningún JAR"
             exit 1
           fi
-          APP_DIR="/home/adminUbuntu-Backend/app"
+          # Usar el home del runner (así evita permisos)
+          APP_DIR="$HOME/app"
           mkdir -p "$APP_DIR"
           cp "$JAR_FILE" "$APP_DIR/backend.jar"
           OLD_PID=$(pgrep -f "java.*backend.jar" || true)
