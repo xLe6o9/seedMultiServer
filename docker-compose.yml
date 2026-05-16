@@ -1,0 +1,18 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: containerDocker-nginx
+    restart: always
+    network_mode: host
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ${HTML_PATH}:/usr/share/nginx/html
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: containerCloudflared-Try
+    restart: always
+    network_mode: host
+    command: tunnel --no-autoupdate --url http://localhost:80
+    depends_on:
+      - nginx
