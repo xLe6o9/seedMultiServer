@@ -30,11 +30,6 @@ jobs:
     needs: build
     runs-on: self-hosted
     steps:
-      - name: Configurar JDK 21 en el runner
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
       - name: Descargar JAR
         uses: actions/download-artifact@v4
         with:
@@ -49,9 +44,10 @@ jobs:
           SPRING_PROFILES_ACTIVE: prod
         run: |
           set -e
-          # Verificar java
-          java -version
-          # Buscar JAR
+          # Forzar PATH y usar ruta absoluta
+          export PATH=/usr/bin:$PATH
+          echo "Ruta de Java: $(which java)"
+          /usr/bin/java -version
           JAR_FILE=$(find . -name "*.jar" | head -1)
           if [ -z "$JAR_FILE" ]; then
             echo "ERROR: No se encontró ningún JAR"
@@ -74,7 +70,7 @@ jobs:
           export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
           export BACKEND_NAME="$BACKEND_NAME"
           export SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE"
-          nohup java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
+          nohup /usr/bin/java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
           JOB_PID=$!
           disown $JOB_PID
           sleep 5
