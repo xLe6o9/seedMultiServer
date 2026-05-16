@@ -1,7 +1,5 @@
-# Nombre del workflow
 name: CI/CD Pipeline
 
-# Eventos que lo activan
 on:
   push:
     branches: [ "main" ]
@@ -9,39 +7,36 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # ========== CI: compilar y empaquetar ==========
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
     steps:
       - name: Clonar código
         uses: actions/checkout@v4
-
       - name: Configurar JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-
       - name: Compilar con Maven
         run: mvn clean package
-
       - name: Subir artefacto (JAR)
         uses: actions/upload-artifact@v4
         with:
           name: backend-jar
           path: target/*.jar
 
-  # ========== CD: desplegar en VM local ==========
   deploy:
     needs: build
-    runs-on: self-hosted   # Tu runner en Ubuntu Backend
+    runs-on: self-hosted
     steps:
       - name: Descargar JAR
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-
-      - name: Desplegar aplicación (método robusto con nohup + disown)
+      - name: Desplegar aplicación
         env:
           POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
           POSTGRES_USER: adminSUSE-POSTGRESQL
@@ -49,63 +44,34 @@ jobs:
           BACKEND_NAME: seedBackendProject
         run: |
           set -e
-          echo "=== Directorio actual ==="
-          pwd
-          ls -la
-
-          # Buscar el JAR descargado (nombre exacto puede variar)
           JAR_FILE=$(find . -name "*.jar" | head -1)
           if [ -z "$JAR_FILE" ]; then
             echo "ERROR: No se encontró ningún JAR"
             exit 1
           fi
-          echo "JAR encontrado: $JAR_FILE"
-
-          # Directorio donde vivirá la app
           APP_DIR="/home/adminUbuntu-Backend/app"
           mkdir -p "$APP_DIR"
-
-          # Copiar el nuevo JAR
           cp "$JAR_FILE" "$APP_DIR/backend.jar"
-          echo "JAR copiado a $APP_DIR/backend.jar"
-
-          # --- 1. Matar proceso anterior (si existe) ---
-          # Buscar PID del proceso java que ejecuta backend.jar
           OLD_PID=$(pgrep -f "java.*backend.jar" || true)
           if [ -n "$OLD_PID" ]; then
-            echo "Matando proceso anterior PID $OLD_PID"
             kill -15 "$OLD_PID" || true
             sleep 3
-            # Forzar si no murió
             if kill -0 "$OLD_PID" 2>/dev/null; then
               kill -9 "$OLD_PID" || true
             fi
           fi
-
-          # --- 2. Lanzar nueva versión ---
           cd "$APP_DIR"
           export POSTGRES_URL="$POSTGRES_URL"
           export POSTGRES_USER="$POSTGRES_USER"
           export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
           export BACKEND_NAME="$BACKEND_NAME"
-
-          # Usar nohup + disown para desvincular del runner
           nohup /usr/bin/java -jar backend.jar > app.log 2>&1 &
           JOB_PID=$!
-          echo "Aplicación lanzada con PID: $JOB_PID"
-
-          # Disown para que el proceso no reciba SIGHUP al terminar el job
           disown $JOB_PID
-
-          # --- 3. Verificar que el proceso sobrevive ---
           sleep 5
           if pgrep -f "java.*backend.jar" > /dev/null; then
-            NEW_PID=$(pgrep -f "java.*backend.jar")
-            echo "✅ Aplicación en ejecución (PID $NEW_PID)"
-            echo "=== Últimas líneas del log ==="
-            tail -30 app.log
+            echo "✅ Aplicación desplegada"
           else
-            echo "❌ La aplicación no arrancó. Log completo:"
-            cat app.log
+            echo "❌ Error"
             exit 1
           fi
