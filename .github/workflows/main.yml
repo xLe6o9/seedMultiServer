@@ -1,0 +1,82 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Compilar con Maven
+        run: mvn clean package
+        working-directory: Backend
+      - name: Subir artefacto (JAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: Backend/target/*.jar
+
+  deploy:
+    needs: build
+    runs-on: [self-hosted, backend]   # <-- ETIQUETA backend
+    steps:
+      - name: Descargar JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: .
+      - name: Desplegar aplicación
+        env:
+          POSTGRES_URL: jdbc:postgresql://192.168.122.10:5432/db_PostgreSQL_test
+          POSTGRES_USER: adminSUSE-POSTGRESQL
+          POSTGRES_PASSWORD: admin123
+          BACKEND_NAME: seedBackendProject
+          SPRING_PROFILES_ACTIVE: prod
+        run: |
+          set -e
+          export PATH=/usr/bin:$PATH
+          echo "Ruta de Java: $(which java)"
+          /usr/bin/java -version
+          JAR_FILE=$(find . -name "*.jar" | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "ERROR: No se encontró ningún JAR"
+            exit 1
+          fi
+          APP_DIR="$HOME/app"
+          mkdir -p "$APP_DIR"
+          cp "$JAR_FILE" "$APP_DIR/backend.jar"
+          OLD_PID=$(pgrep -f "java.*backend.jar" || true)
+          if [ -n "$OLD_PID" ]; then
+            kill -15 "$OLD_PID" || true
+            sleep 3
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+              kill -9 "$OLD_PID" || true
+            fi
+          fi
+          cd "$APP_DIR"
+          export POSTGRES_URL="$POSTGRES_URL"
+          export POSTGRES_USER="$POSTGRES_USER"
+          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+          export BACKEND_NAME="$BACKEND_NAME"
+          export SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE"
+          nohup /usr/bin/java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
+          JOB_PID=$!
+          disown $JOB_PID
+          sleep 5
+          if pgrep -f "java.*backend.jar" > /dev/null; then
+            echo "✅ Aplicación desplegada"
+          else
+            echo "❌ Error. Mostrando log:"
+            cat app.log
+            exit 1
+          fi
