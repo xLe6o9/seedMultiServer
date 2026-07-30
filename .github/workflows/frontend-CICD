@@ -1,0 +1,103 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - frontend-SetupSeed
+    paths:
+      - 'Frontend/react-app/**'   # Ajusta esta ruta si tu carpeta real es distinta
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Frontend/react-app/**'
+
+jobs:
+
+  # =====================  JOB 1: BUILD + TEST  =====================
+  # IMPORTANTE: antes esta validación solo corría en pull_request. Se corrigió
+  # para que corra SIEMPRE (push y pull_request), y los deploys ahora dependen
+  # de este job con "needs: build". Así nunca se despliega código sin probar.
+  build:
+    name: Build y test (Frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # Misma versión que usa tu Dockerfile (node:20-alpine)
+
+      - name: Instalar dependencias
+        working-directory: Frontend/react-app
+        run: npm ci
+
+      - name: Build de verificación
+        # Confirma que el proyecto compila antes de desplegar. Este build es solo de
+        # validación; el build real que se sirve en producción ocurre dentro del
+        # Dockerfile durante el deploy. No hay paso de "npm test" porque hoy no tienes
+        # ningún script de tests en package.json. El día que agregues uno (por ejemplo
+        # con Vitest), solo tienes que volver a añadir aquí:
+        # - name: Ejecutar pruebas
+        #   working-directory: Frontend/react-app
+        #   run: npm test -- --run
+        working-directory: Frontend/react-app
+        run: npm run build
+
+  # =====================  JOB 2: DEPLOY A DEV  =====================
+  deploy-dev:
+    name: Deploy Frontend (dev)
+    needs: build   # No despliega si el build/test anterior falló
+    if: github.event_name == 'push' && github.ref == 'refs/heads/frontend-SetupSeed'
+    runs-on: [self-hosted, frontend]   # Runner físico en la VM 192.168.122.40
+    environment: frontend-dev
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      - name: Generar archivo .env (dev)
+        # Vite necesita las variables de entorno EN TIEMPO DE BUILD (no en runtime,
+        # porque el resultado final son archivos estáticos servidos por Nginx).
+        # Este paso escribe un archivo .env real justo antes de construir la imagen,
+        # usando el secret configurado en el entorno "frontend-dev" de GitHub.
+        # El archivo nunca se guarda en el repositorio (agrégalo a .gitignore).
+        # Hoy tu código React todavía no lee import.meta.env.VITE_API_URL en ninguna
+        # parte, así que este archivo se genera pero no cambia el comportamiento de la
+        # app todavía. Es seguro dejarlo — en cuanto uses esa variable en tu código,
+        # empezará a tomar efecto sin tocar este workflow.
+        working-directory: Frontend/react-app
+        run: echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" > .env
+
+      - name: Deploy con Docker Compose (dev)
+        working-directory: Frontend/react-app
+        run: |
+          docker compose down --remove-orphans || true
+          docker compose build --no-cache
+          docker compose up -d
+
+  # =====================  JOB 3: DEPLOY A PROD  =====================
+  deploy-prod:
+    name: Deploy Frontend (prod)
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, frontend]   # Mismo runner físico que dev, misma VM 192.168.122.40
+    environment: frontend-prod
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      - name: Generar archivo .env (prod)
+        # Mismo caso que en dev: se genera aunque tu código aún no la use. Sin efecto
+        # negativo, queda listo para cuando integres import.meta.env.VITE_API_URL.
+        working-directory: Frontend/react-app
+        run: echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" > .env
+
+      - name: Deploy con Docker Compose (prod)
+        working-directory: Frontend/react-app
+        run: |
+          docker compose down --remove-orphans || true
+          docker compose build --no-cache
+          docker compose up -d
