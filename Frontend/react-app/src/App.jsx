@@ -4,6 +4,8 @@ import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
 import './App.css'
 
+// Este es un comentario de prueba para verificar el flujo FRONTEND CI/CD
+
 function App() {
   const [count, setCount] = useState(0)
 
