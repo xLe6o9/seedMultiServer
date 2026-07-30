@@ -3,6 +3,7 @@ package io.xfactor.seedbackend;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
+// Este es un comentario de prueba para verificar el flujo BACKEND CI/CD
 @SpringBootApplication
 public class SeedBackendProjectApplication {
 
