@@ -1,0 +1,184 @@
+#Nombre visible del workflow en la pestaña "Actions" de GitHub.
+name: Backend CI/CD
+ 
+# ---------------------------------------------------------------------------
+# SECCIÓN "on": define QUÉ eventos disparan este workflow.
+# ---------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - main               # Se activa cuando llegan commits a main (normalmente por un merge de PR)
+      - backend-SetupSeed   # Se activa cuando haces push directo a tu rama de trabajo
+    paths:
+      - 'Backend/**'        # Solo se activa si el cambio toca archivos dentro de la carpeta Backend
+  pull_request:
+    branches:
+      - main                # Se activa cuando ABRES o actualizas un PR que apunta a main
+    paths:
+      - 'Backend/**'
+ 
+# ---------------------------------------------------------------------------
+# SECCIÓN "jobs": cada job es un bloque de trabajo independiente.
+# ---------------------------------------------------------------------------
+jobs:
+ 
+  # =====================  JOB 1: BUILD + TEST  =====================
+  # Corre SIEMPRE que el workflow se dispara (push o pull_request).
+  # Su única responsabilidad es compilar y validar el código; nunca despliega.
+  build:
+    name: Build y test (Backend)
+    runs-on: ubuntu-latest   # Runner temporal de GitHub, se destruye al terminar. No es tu VM.
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4   # Descarga el contenido del repo en el runner temporal
+ 
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+ 
+      - name: Compilar con Maven
+        # mvn clean package ya ejecuta por sí solo la fase "test" del ciclo de vida de Maven
+        # antes de empaquetar. Hoy no tienes ninguna clase de test en Backend/src/test/java,
+        # así que esa fase simplemente no encuentra nada que correr y compila directo, sin
+        # fallar por "falta de tests". El día que agregues tests ahí, se ejecutarán aquí mismo
+        # sin necesidad de tocar este workflow. Si en el futuro quieres usar un perfil "test"
+        # específico de Spring para esos tests, el comando sería:
+        # mvn test -Dspring.profiles.active=test
+        run: mvn clean package
+        working-directory: Backend
+ 
+      - name: Subir artefacto (JAR)
+        # Guarda el .jar generado para que los jobs de deploy (que corren en otro runner)
+        # puedan descargarlo. Sin esto, el jar se perdería al terminar este job.
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: Backend/target/*.jar
+ 
+  # =====================  JOB 2: DEPLOY A DEV  =====================
+  deploy-dev:
+    name: Deploy Backend (dev)
+    needs: build   # Espera a que "build" termine con éxito antes de correr. Si build falla, esto no se ejecuta.
+    # Esta condición es la clave de todo el diseño:
+    # SOLO corre si el evento fue un push (no un PR) Y la rama es exactamente backend-SetupSeed.
+    # Así, abrir un PR nunca despliega nada; solo un push directo a tu rama de trabajo lo hace.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/backend-SetupSeed'
+    runs-on: [self-hosted, backend]   # Tu runner propio, instalado físicamente en la VM 192.168.122.30
+    environment: backend-dev
+    # "environment" conecta este job con los Secrets y las reglas de protección
+    # que configures en GitHub para el entorno "backend-dev" (ver guía paso a paso).
+    steps:
+      - name: Descargar JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: .
+ 
+      - name: Desplegar aplicación (dev)
+        env:
+          # Estos valores NO están escritos aquí: se leen de los Secrets del entorno
+          # "backend-dev" que configurarás en GitHub. Nunca quedan visibles en el código.
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          BACKEND_NAME: seedBackendProject
+          # Le dice a Spring Boot qué application-dev.yml usar. Hoy ese archivo no existe
+          # en tu proyecto, así que esta variable no cambia nada todavía: Spring simplemente
+          # la ignora y corre con tu configuración base actual. Es seguro dejarla así — el
+          # día que crees Backend/src/main/resources/application-dev.yml, empezará a
+          # aplicarse sola, sin tocar este workflow.
+          SPRING_PROFILES_ACTIVE: dev
+        run: |
+          set -e
+          export PATH=/usr/bin:$PATH
+          JAR_FILE=$(find . -name "*.jar" | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "ERROR: No se encontró ningún JAR"
+            exit 1
+          fi
+          APP_DIR="$HOME/app"
+          mkdir -p "$APP_DIR"
+          cp "$JAR_FILE" "$APP_DIR/backend.jar"
+          # Busca si ya hay una instancia corriendo y la detiene antes de reemplazarla
+          OLD_PID=$(pgrep -f "java.*backend.jar" || true)
+          if [ -n "$OLD_PID" ]; then
+            kill -15 "$OLD_PID" || true   # Intento de cierre limpio (SIGTERM)
+            sleep 3
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+              kill -9 "$OLD_PID" || true   # Si no cerró, forzar cierre (SIGKILL)
+            fi
+          fi
+          cd "$APP_DIR"
+          nohup /usr/bin/java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
+          disown $!
+          sleep 5
+          if pgrep -f "java.*backend.jar" > /dev/null; then
+            echo "Aplicación (dev) desplegada correctamente"
+          else
+            echo "Error en el despliegue, mostrando log:"
+            cat app.log
+            exit 1
+          fi
+ 
+  # =====================  JOB 3: DEPLOY A PROD  =====================
+  deploy-prod:
+    name: Deploy Backend (prod)
+    needs: build
+    # SOLO corre cuando el push llega a main. Esto solo ocurre cuando TÚ mergeas
+    # manualmente un Pull Request (o haces push directo a main, algo que normalmente
+    # no harás si activas la protección de rama que se explica en la guía).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, backend]   # Mismo runner físico que dev, porque hoy solo tienes 1 VM de backend
+    environment: backend-prod
+    # Si activas "required reviewers" en el entorno backend-prod, este job queda
+    # PAUSADO esperando tu aprobación manual antes de tocar la VM real.
+    steps:
+      - name: Descargar JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: .
+ 
+      - name: Desplegar aplicación (prod)
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          BACKEND_NAME: seedBackendProject
+          # Igual que en dev: sin application-prod.yml esta variable hoy no tiene efecto,
+          # pero no rompe nada. La máquina ya tiene todo lo necesario para desplegar el
+          # .jar completo sin depender de perfiles.
+          SPRING_PROFILES_ACTIVE: prod
+        run: |
+          set -e
+          export PATH=/usr/bin:$PATH
+          JAR_FILE=$(find . -name "*.jar" | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "ERROR: No se encontró ningún JAR"
+            exit 1
+          fi
+          APP_DIR="$HOME/app"
+          mkdir -p "$APP_DIR"
+          cp "$JAR_FILE" "$APP_DIR/backend.jar"
+          OLD_PID=$(pgrep -f "java.*backend.jar" || true)
+          if [ -n "$OLD_PID" ]; then
+            kill -15 "$OLD_PID" || true
+            sleep 3
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+              kill -9 "$OLD_PID" || true
+            fi
+          fi
+          cd "$APP_DIR"
+          nohup /usr/bin/java -jar -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} backend.jar > app.log 2>&1 &
+          disown $!
+          sleep 5
+          if pgrep -f "java.*backend.jar" > /dev/null; then
+            echo "Aplicación (prod) desplegada correctamente"
+          else
+            echo "Error en el despliegue, mostrando log:"
+            cat app.log
+            exit 1
+          fi
+ 
